@@ -95,6 +95,18 @@ export default function HalamanUtama() {
         </Text>
       )}
 
+      {cuaca && (
+        <Text style={{ fontSize: 12, color: "#888" }}>
+          Hari ini: {cuaca.harian.suhuMaksimal[0]}°C / {cuaca.harian.suhuMinimal[0]}°C
+        </Text>
+      )}
+
+      {kualitasUdara && (
+        <Text style={{ fontSize: 12, color: "#888" }}>
+          PM2.5: {kualitasUdara.pm25} µg/m³ • PM10: {kualitasUdara.pm10} µg/m³
+        </Text>
+      )}
+
       <AtribusiCuaca />
     </SafeAreaView>
   );
