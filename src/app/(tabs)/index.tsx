@@ -10,6 +10,7 @@ import { cariKota } from "../../services/geocodingService";
 import { ambilCuaca } from "../../services/weatherService";
 import { ambilKualitasUdara } from "../../services/airQualityService";
 import { konversiTingkatAQI } from "../../services/weatherAdapter";
+import { mintaIzinLokasi, ambilKoordinatSaatIni } from "../../services/locationService";
 import { labelKodeCuaca } from "../../constants/weatherCodes";
 import { HasilGeocoding } from "../../types/geocoding";
 import { DataCuacaLengkap, DataKualitasUdara } from "../../types/weather";
@@ -22,6 +23,7 @@ export default function HalamanUtama() {
   const [kualitasUdara, setKualitasUdara] = useState<DataKualitasUdara | null>(null);
   const [sedangMemuat, setSedangMemuat] = useState(false);
   const [pesanError, setPesanError] = useState<string | null>(null);
+  const [pesanLokasi, setPesanLokasi] = useState<string | null>(null);
 
   const teksTertunda = useDebounce(teksCari, 500);
   const requestIdRef = useRef(0); // pencegah race condition
@@ -57,9 +59,35 @@ export default function HalamanUtama() {
     }
   }
 
+  async function gunakanLokasiSaatIni() {
+    const status = await mintaIzinLokasi();
+
+    if (status === "denied") {
+      setPesanLokasi("Izin lokasi ditolak. Silakan cari kota secara manual di atas.");
+      return;
+    }
+    if (status === "unavailable") {
+      setPesanLokasi("Layanan lokasi tidak aktif di perangkat ini. Silakan cari kota secara manual.");
+      return;
+    }
+
+    setPesanLokasi(null);
+    const koordinat = await ambilKoordinatSaatIni();
+    pilihKota({
+      id: -1,
+      name: "Lokasi Saat Ini",
+      latitude: koordinat.latitude,
+      longitude: koordinat.longitude,
+      country: "",
+    });
+  }
+
   return (
     <SafeAreaView style={{ flex: 1, padding: 16, gap: 16 }}>
       <SearchBox onCari={setTeksCari} />
+
+      <Button title="Gunakan Lokasi Saat Ini" onPress={gunakanLokasiSaatIni} />
+      {pesanLokasi && <Text>{pesanLokasi}</Text>}
 
       {hasilPencarian.map((kota) => (
         <TouchableOpacity key={kota.id} onPress={() => pilihKota(kota)}>
