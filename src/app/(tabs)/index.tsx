@@ -13,6 +13,12 @@ import { ambilKualitasUdara } from "../../services/airQualityService";
 import { konversiTingkatAQI } from "../../services/weatherAdapter";
 import { mintaIzinLokasi, ambilKoordinatSaatIni } from "../../services/locationService";
 import { ambilSemuaFavorit } from "../../services/favoritStorage";
+import {
+  simpanKota,
+  cariKotaTersimpan,
+  simpanCuaca,
+  ambilCuacaTersimpan,
+} from "../../services/cacheService";
 import { labelKodeCuaca } from "../../constants/weatherCodes";
 import { HasilGeocoding } from "../../types/geocoding";
 import { DataCuacaLengkap, DataKualitasUdara } from "../../types/weather";
@@ -27,6 +33,8 @@ export default function HalamanUtama() {
   const [pesanError, setPesanError] = useState<string | null>(null);
   const [pesanLokasi, setPesanLokasi] = useState<string | null>(null);
   const [sudahFavorit, setSudahFavorit] = useState(false);
+  const [pencarianOffline, setPencarianOffline] = useState(false);
+  const [waktuData, setWaktuData] = useState<string | null>(null);
 
   const teksTertunda = useDebounce(teksCari, 500);
   const requestIdRef = useRef(0); // pencegah race condition
@@ -34,13 +42,23 @@ export default function HalamanUtama() {
   useEffect(() => {
     if (teksTertunda.trim().length === 0) {
       setHasilPencarian([]);
+      setPencarianOffline(false);
       return;
     }
-    cariKota(teksTertunda).then(setHasilPencarian).catch(() => setHasilPencarian([]));
+    cariKota(teksTertunda)
+      .then((hasil) => {
+        setHasilPencarian(hasil);
+        setPencarianOffline(false);
+        simpanKota(hasil).catch(() => {});
+      })
+      .catch(async () => {
+        // gagal (offline) -> cari di kota yang pernah tersimpan
+        const lokal = await cariKotaTersimpan(teksTertunda);
+        setHasilPencarian(lokal);
+        setPencarianOffline(true);
+      });
   }, [teksTertunda]);
 
-  // Cek apakah kota terpilih sudah ada di favorit (dijalankan tiap layar kembali fokus,
-  // supaya tombol ikut berubah setelah modal Simpan ditutup)
   useFocusEffect(
     useCallback(() => {
       if (!kotaTerpilih) {
@@ -58,6 +76,7 @@ export default function HalamanUtama() {
     const idSaatIni = ++requestIdRef.current;
     setSedangMemuat(true);
     setPesanError(null);
+    setWaktuData(null);
 
     try {
       const [dataCuaca, dataAQI] = await Promise.all([
@@ -68,9 +87,21 @@ export default function HalamanUtama() {
       if (idSaatIni !== requestIdRef.current) return; // hasil basi, abaikan
       setCuaca(dataCuaca);
       setKualitasUdara(dataAQI);
+      simpanCuaca(kota.latitude, kota.longitude, dataCuaca, dataAQI).catch(() => {});
     } catch (err) {
       if (idSaatIni !== requestIdRef.current) return;
-      setPesanError("Gagal memuat data cuaca. Periksa koneksi internet Anda.");
+      // gagal (offline) -> coba pakai data tersimpan
+      const tersimpan = await ambilCuacaTersimpan(kota.latitude, kota.longitude);
+      if (idSaatIni !== requestIdRef.current) return;
+      if (tersimpan) {
+        setCuaca(tersimpan.cuaca);
+        setKualitasUdara(tersimpan.kualitasUdara);
+        setWaktuData(tersimpan.waktuSimpan);
+      } else {
+        setCuaca(null);
+        setKualitasUdara(null);
+        setPesanError("Tidak ada koneksi dan belum ada data tersimpan untuk kota ini.");
+      }
     } finally {
       if (idSaatIni === requestIdRef.current) setSedangMemuat(false);
     }
@@ -106,6 +137,15 @@ export default function HalamanUtama() {
       <Button title="Gunakan Lokasi Saat Ini" onPress={gunakanLokasiSaatIni} />
       {pesanLokasi && <Text>{pesanLokasi}</Text>}
 
+      {pencarianOffline && (
+        <Text style={{ fontSize: 12, color: "#B45309" }}>
+          Mode offline: pencarian hanya dari kota yang pernah dicari sebelumnya.
+        </Text>
+      )}
+      {pencarianOffline && hasilPencarian.length === 0 && (
+        <Text>Kota tidak ditemukan di data tersimpan</Text>
+      )}
+
       {hasilPencarian.map((kota) => (
         <TouchableOpacity key={kota.id} onPress={() => pilihKota(kota)}>
           <Text>{kota.name}</Text>
@@ -122,6 +162,13 @@ export default function HalamanUtama() {
             onPress={() => kotaTerpilih && pilihKota(kotaTerpilih)}
           />
         </View>
+      )}
+
+      {waktuData && (
+        <Text style={{ fontSize: 12, color: "#B45309" }}>
+          Mode offline: data tersimpan, terakhir diperbarui{" "}
+          {new Date(waktuData).toLocaleString("id-ID")}
+        </Text>
       )}
 
       {cuaca && kualitasUdara && kotaTerpilih && !sedangMemuat && (
